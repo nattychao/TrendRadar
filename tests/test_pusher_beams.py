@@ -6,6 +6,7 @@ import unittest
 from trendradar.notification.senders import (
     PUSHER_BEAMS_PAYLOAD_LIMIT,
     build_pusher_beams_payload,
+    describe_pusher_beams_payload,
 )
 
 
@@ -73,6 +74,16 @@ class PusherBeamsPayloadTests(unittest.TestCase):
         self.assertEqual(hotspot["total"], 200)
         self.assertLess(len(hotspot["items"]), 200)
         self.assertGreater(len(hotspot["items"]), 0)
+
+
+    def test_the_log_shows_what_the_phone_gets(self):
+        payload = build_pusher_beams_payload(_report(2), "当前榜单", "hotspot")
+        text = describe_pusher_beams_payload(payload)
+        self.assertIn("标题：热点 · 当前榜单", text)
+        self.assertIn("订阅：hotspot", text)
+        self.assertIn("附带条目：2/2", text)
+        self.assertIn("1. [科技] 热点0字字字字字字字字字字（微博） 🆕", text)
+        self.assertIn("https://m.example.com/1", text)
 
 
 if __name__ == "__main__":

@@ -1434,6 +1434,30 @@ def build_pusher_beams_payload(
     return {"interests": [interest], "apns": apns}
 
 
+def describe_pusher_beams_payload(payload: Dict) -> str:
+    """推送内容的可读版本，打印到日志里：通知标题、正文和附带的每一条，与手机收到的一致。"""
+    apns = payload.get("apns", {})
+    alert = apns.get("aps", {}).get("alert", {})
+    hotspot = apns.get("hotspot", {})
+    items = hotspot.get("items", [])
+    size = len(json.dumps(apns, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    lines = [
+        "──── Pusher Beams 推送内容 ────",
+        f"订阅：{', '.join(payload.get('interests', []))}    大小：{size} 字节",
+        f"标题：{alert.get('title', '')}",
+        "正文：",
+    ]
+    lines += [f"  {line}" for line in (alert.get("body") or "").split("\n")]
+    lines.append(f"附带条目：{len(items)}/{hotspot.get('total', len(items))}")
+    for index, item in enumerate(items, 1):
+        new = " 🆕" if item.get("n") else ""
+        lines.append(f"  {index}. [{item.get('k', '')}] {item.get('t', '')}（{item.get('s', '')}）{new}")
+        if item.get("u"):
+            lines.append(f"     {item['u']}")
+    lines.append("──────────────────────────────")
+    return "\n".join(lines)
+
+
 def send_to_pusher_beams(
     instance_id: str,
     secret_key: str,
@@ -1477,6 +1501,7 @@ def send_to_pusher_beams(
     carried = len(payload["apns"]["hotspot"]["items"])
     total = payload["apns"]["hotspot"]["total"]
     print(f"发送 Pusher Beams 到 {interest}，附带 {carried}/{total} 条 [{report_type}]")
+    print(describe_pusher_beams_payload(payload))
 
     try:
         response = requests.post(url, json=payload, headers=headers, proxies=proxies, timeout=30)

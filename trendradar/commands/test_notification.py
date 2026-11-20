@@ -80,6 +80,7 @@ def run_test_notification(config: Dict) -> bool:
                 config.get("BARK_URL"),
                 config.get("SLACK_WEBHOOK_URL"),
                 config.get("GENERIC_WEBHOOK_URL"),
+                (config.get("PUSHER_BEAMS_INSTANCE_ID") and config.get("PUSHER_BEAMS_SECRET_KEY")),
             ]
         )
         if not has_notification:

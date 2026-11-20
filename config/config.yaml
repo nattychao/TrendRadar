@@ -239,15 +239,15 @@ display:
                                       # 注：热点词汇统计中的新增标记🆕不受此配置影响
 
     rss: true                         # RSS 订阅区域（true=显示并分析, false=隐藏并跳过分析）
-    standalone: false                 # 独立展示区：完整热榜/RSS，不受关键词过滤（true=显示, false=隐藏）
+    standalone: true                  # 独立展示区：完整热榜/RSS，不受关键词过滤（true=显示, false=隐藏）
     ai_analysis: true                 # AI 分析区域（true=显示, false=隐藏）
 
   # 独立展示区：将指定平台/RSS 完整展示，不受关键词过滤
   # 推送展示由 regions.standalone 控制，AI 分析由 ai_analysis.include_standalone 控制
   standalone:
-    platforms: ["zhihu", "wallstreetcn-hot"]     # 热榜平台 ID 列表（如 ["zhihu", "weibo"]）
+    platforms: ["toutiao", "douyin"]             # 热榜平台 ID 列表（如 ["zhihu", "weibo"]）
     rss_feeds: []                                # RSS 源 ID 列表（如 ["hacker-news"]）
-    max_items: 20                                # 每个源最多展示条数（0=不限制）
+    max_items: 5                                 # 每个源最多展示条数（0=不限制）
 
 
 # ===============================================================
@@ -302,6 +302,11 @@ notification:
       payload_template: ""            # JSON 模板，支持 {title} 和 {content} 占位符
                                       # 示例：{"content": "{content}"}
                                       # 留空则使用默认格式：{"title": "{title}", "content": "{content}"}
+
+    pusher_beams:                     # Pusher Beams → APNs → iOS App
+      instance_id: ""                 # Beams 实例 ID（建议用环境变量 PUSHER_BEAMS_INSTANCE_ID）
+      secret_key: ""                  # Beams 密钥 Primary key（务必用环境变量 PUSHER_BEAMS_SECRET_KEY，不要写在这里）
+      interest: "hotspot"             # 订阅名称，与 App 订阅的一致
 
 
 # ===============================================================

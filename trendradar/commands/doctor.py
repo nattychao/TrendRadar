@@ -210,6 +210,7 @@ def _check_notification_channels(results: List[Tuple[str, str, str]], config: Di
         ("BARK_URL", "Bark"),
         ("SLACK_WEBHOOK_URL", "Slack"),
         ("GENERIC_WEBHOOK_URL", "通用Webhook"),
+        ("PUSHER_BEAMS_SECRET_KEY", "Pusher Beams"),
     ]:
         values = parse_multi_account_config(config.get(key, ""))
         if values:

@@ -11,6 +11,7 @@
 - ntfy
 - Bark
 - Slack
+- Pusher Beams（iOS App）
 
 每个发送函数都支持分批发送，并通过参数化配置实现与 CONFIG 的解耦。
 """
@@ -1325,3 +1326,171 @@ def send_to_generic_webhook(
     print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
 
     return True
+
+
+# ===============================================================
+# Pusher Beams（经 APNs 推送到 iOS App）
+# ===============================================================
+
+# APNs 单条负载上限 4096 字节；Beams 还会往里加自己的字段（publishId 等），
+# 留出余量。
+PUSHER_BEAMS_PAYLOAD_LIMIT = 3600
+# 通知正文里列出的条数，其余在附带数据里。
+PUSHER_BEAMS_BODY_ITEMS = 3
+
+
+def _collect_hotspot_items(report_data: Dict, standalone_data: Optional[Dict] = None) -> list:
+    """
+    按报告顺序取出热点条目（去重），每条：标题、来源、链接、分组、是否新增。
+
+    先是关键词匹配到的（分组为关键词组），再是独立展示区各平台的榜单
+    （分组为平台名，例如“今日头条”）。
+    """
+    items = []
+    seen = set()
+
+    def add(title, source, url, group, is_new):
+        title = (title or "").strip()
+        if not title:
+            return
+        key = (title, url)
+        if key in seen:
+            return
+        seen.add(key)
+        items.append({"t": title, "s": source, "u": url, "k": group, "n": bool(is_new)})
+
+    for stat in report_data.get("stats", []) or []:
+        word = stat.get("word", "")
+        for title_data in stat.get("titles", []) or []:
+            add(
+                title_data.get("title"),
+                title_data.get("source_name", ""),
+                title_data.get("mobile_url") or title_data.get("url") or "",
+                word,
+                title_data.get("is_new", False),
+            )
+
+    for platform in (standalone_data or {}).get("platforms", []) or []:
+        name = platform.get("name") or platform.get("id", "")
+        for item in platform.get("items", []) or []:
+            add(
+                item.get("title"),
+                name,
+                item.get("mobileUrl") or item.get("url") or "",
+                name,
+                False,
+            )
+    return items
+
+
+def build_pusher_beams_payload(
+    report_data: Dict,
+    report_type: str,
+    interest: str,
+    mode: str = "daily",
+    limit: int = PUSHER_BEAMS_PAYLOAD_LIMIT,
+    standalone_data: Optional[Dict] = None,
+) -> Optional[Dict]:
+    """
+    组装发给 Pusher Beams 的请求体，没有热点时返回 None。
+
+    一次报告一条推送：
+    - 通知标题：热点 · 报告类型
+    - 通知正文：前几条标题，多出的写“等 N 条”
+    - 附带数据 apns.hotspot：条目列表（t 标题 / s 来源 / u 链接 / k 关键词组 / n 是否新增），
+      按顺序放到 APNs 负载装得下为止，total 是本次报告的总条数
+    """
+    items = _collect_hotspot_items(report_data, standalone_data)
+    if not items:
+        return None
+
+    lines = [f"• {item['t']}" for item in items[:PUSHER_BEAMS_BODY_ITEMS]]
+    if len(items) > PUSHER_BEAMS_BODY_ITEMS:
+        lines.append(f"等 {len(items)} 条")
+
+    apns = {
+        "aps": {
+            "alert": {"title": f"热点 · {report_type}", "body": "\n".join(lines)},
+            "sound": "default",
+            "thread-id": "trendradar",
+        },
+        "hotspot": {"report": report_type, "mode": mode, "total": len(items), "items": []},
+    }
+
+    def size() -> int:
+        return len(json.dumps(apns, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    carried = apns["hotspot"]["items"]
+    for item in items:
+        carried.append(item)
+        if size() > limit:
+            carried.pop()
+            break
+
+    # 正文本身就超了（极长的标题）：截短正文
+    while size() > limit and apns["aps"]["alert"]["body"]:
+        apns["aps"]["alert"]["body"] = apns["aps"]["alert"]["body"][:-20]
+
+    return {"interests": [interest], "apns": apns}
+
+
+def send_to_pusher_beams(
+    instance_id: str,
+    secret_key: str,
+    interest: str,
+    report_data: Dict,
+    report_type: str,
+    proxy_url: Optional[str] = None,
+    mode: str = "daily",
+    standalone_data: Optional[Dict] = None,
+) -> bool:
+    """
+    发送到 Pusher Beams：发布到 interest，Beams 交给 APNs，送到订阅了它的设备。
+
+    Args:
+        instance_id: Beams 实例 ID
+        secret_key: Beams 密钥（Primary key）
+        interest: 订阅名称，与 App 订阅的一致（例如 hotspot）
+        report_data: 报告数据
+        report_type: 报告类型
+        proxy_url: 代理 URL（可选）
+        mode: 报告模式
+        standalone_data: 独立展示区数据（可选，各平台榜单前几条）
+
+    Returns:
+        bool: 发送是否成功（没有热点可推时也返回 True）
+    """
+    payload = build_pusher_beams_payload(report_data, report_type, interest, mode, standalone_data=standalone_data)
+    if payload is None:
+        print(f"Pusher Beams 没有可推送的热点，跳过 [{report_type}]")
+        return True
+
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    url = (
+        f"https://{instance_id}.pushnotifications.pusher.com"
+        f"/publish_api/v1/instances/{instance_id}/publishes/interests"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {secret_key}",
+    }
+    carried = len(payload["apns"]["hotspot"]["items"])
+    total = payload["apns"]["hotspot"]["total"]
+    print(f"发送 Pusher Beams 到 {interest}，附带 {carried}/{total} 条 [{report_type}]")
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, proxies=proxies, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"Pusher Beams 发送异常 [{report_type}]：{e}")
+        return False
+
+    if response.status_code == 200:
+        try:
+            publish_id = response.json().get("publishId", "")
+        except ValueError:
+            publish_id = ""
+        print(f"Pusher Beams 发送成功 [{report_type}] publishId={publish_id}")
+        return True
+
+    print(f"Pusher Beams 发送失败 [{report_type}]，状态码：{response.status_code}，详情：{response.text[:500]}")
+    return False

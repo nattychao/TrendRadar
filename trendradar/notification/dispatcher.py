@@ -32,6 +32,7 @@ from .senders import (
     send_to_telegram,
     send_to_wework,
     send_to_generic_webhook,
+    send_to_pusher_beams,
 )
 
 
@@ -350,6 +351,22 @@ class NotificationDispatcher:
             results["generic_webhook"] = self._send_generic_webhook(
                 report_data, report_type, update_info, proxy_url, mode, rss_items, rss_new_items,
                 ai_analysis, display_regions, standalone_data
+            )
+
+        # Pusher Beams（iOS App，需要实例 ID 和密钥）
+        if self.config.get("PUSHER_BEAMS_INSTANCE_ID") and self.config.get("PUSHER_BEAMS_SECRET_KEY"):
+            rd, _, _, _, sd = self._apply_display_regions(
+                report_data, display_regions, standalone_data=standalone_data
+            )
+            results["pusher_beams"] = send_to_pusher_beams(
+                instance_id=self.config["PUSHER_BEAMS_INSTANCE_ID"],
+                secret_key=self.config["PUSHER_BEAMS_SECRET_KEY"],
+                interest=self.config.get("PUSHER_BEAMS_INTEREST") or "hotspot",
+                report_data=rd,
+                report_type=report_type,
+                proxy_url=proxy_url,
+                mode=mode,
+                standalone_data=sd,
             )
 
         # 邮件（保持原有逻辑，已支持多收件人，AI 分析已嵌入 HTML）
